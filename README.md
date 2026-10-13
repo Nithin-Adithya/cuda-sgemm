@@ -77,15 +77,44 @@ the build and benchmark commands above in a cell, each prefixed with `!`.
 
 ## Results
 
-Fill in from `./build/sgemm` and `scripts/roofline.py` on your GPU.
+Tesla T4 (Google Colab), measured with the commands above. Raw timings: [docs/bench_t4.csv](docs/bench_t4.csv).
+Measured ceilings: 264 GB/s DRAM bandwidth, 7654 GFLOP/s FMA peak, so the roofline ridge is at 29 FLOP/byte.
 
-GPU: ____ , N = ____
+GFLOP/s by matrix size (best of up to 10 runs):
 
-| Kernel | GFLOP/s | % of cuBLAS | FLOP/byte | Regime |
-|--------|---------|-------------|-----------|--------|
-| naive | | | | |
-| coalesced | | | | |
-| tiled | | | | |
-| regblock | | | | |
-| vectorized | | | | |
-| cuBLAS | | 100 | | |
+| Kernel | N=1024 | N=2048 | N=4096 | % of cuBLAS (N=2048) |
+|--------|-------:|-------:|-------:|---------------------:|
+| naive | 61 | 62 | 62 | 0.9 |
+| coalesced | 812 | 687 | 556 | 9.6 |
+| tiled | 869 | 884 | 868 | 12.4 |
+| regblock | 2230 | 2808 | 2468 | 39.3 |
+| vectorized | 3329 | 4122 | 3305 | 57.7 |
+| cuBLAS | 6026 | 7141 | 6364 | 100 |
+
+Roofline at N=2048, with FLOPs and DRAM bytes from Nsight Compute:
+
+| Kernel | DRAM traffic | FLOP/byte | GFLOP/s | % of roof | Regime |
+|--------|-------------:|----------:|--------:|----------:|--------|
+| naive | 2261 MB | 7.6 | 62 | 3.1 | memory-bound |
+| coalesced | 1685 MB | 10.2 | 687 | 25.5 | memory-bound |
+| tiled | 1676 MB | 10.3 | 884 | 32.6 | memory-bound |
+| regblock | 235 MB | 73.1 | 2808 | 36.7 | compute-bound |
+| vectorized | 204 MB | 84.1 | 4122 | 53.9 | compute-bound |
+| cuBLAS | 325 MB | 52.9 | 7141 | 93.3 | compute-bound |
+
+![Roofline, Tesla T4, N=2048](docs/roofline_t4_2048.png)
+
+What the numbers show:
+
+- **Coalescing is an 11x win without changing the traffic much.** Every kernel executes the same 2N^3 FLOPs
+  (Nsight Compute counts 8.59e9 FMAs for each), and naive and coalesced move a similar number of DRAM
+  bytes. The gain comes from issuing one transaction per warp instead of 32.
+- **Shared-memory tiling alone does not leave the memory-bound region.** It is 1.3x faster than coalesced,
+  but its DRAM traffic is unchanged and it still sits left of the ridge: with one output per thread, every
+  FMA still needs two loads.
+- **Register blocking is the step that crosses the ridge.** DRAM traffic drops 7x, intensity goes from 10
+  to 73 FLOP/byte, and the kernel becomes compute-bound (3.2x over tiled).
+- **Vectorized loads add another 1.5x**, reaching 58% of cuBLAS and 54% of the measured FMA peak.
+- **cuBLAS runs at 93% of the measured FMA peak.** The remaining gap for the hand-written kernel is on the
+  compute side (instruction mix and scheduling inside the inner loop), not in memory traffic: it already
+  moves fewer DRAM bytes than cuBLAS does.
