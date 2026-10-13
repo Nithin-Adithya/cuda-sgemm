@@ -1,5 +1,3 @@
 # GitHub language statistics: the Colab notebook is a generated copy of the
-# sources, and the CUDA sources are C++.
+# sources, so it is left out of the language breakdown.
 *.ipynb linguist-generated
-*.cu    linguist-language=C++
-*.cuh   linguist-language=C++
