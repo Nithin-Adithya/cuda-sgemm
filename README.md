@@ -32,7 +32,7 @@ Benchmark every stage at N = 1024, 2048, 4096:
 ./build/sgemm
 ```
 
-This prints time, GFLOP/s, percent of cuBLAS and the error against cuBLAS for each stage, and writes
+This prints time, GFLOP/s and percent of cuBLAS for each stage, checks the result against cuBLAS and against a double-precision host recomputation of sampled entries, and writes
 `results/bench.csv` and `results/device.csv`. It also measures the two roofline ceilings on your GPU:
 DRAM bandwidth (a triad over 256 MB arrays) and peak FMA rate (register-only FMA chains).
 

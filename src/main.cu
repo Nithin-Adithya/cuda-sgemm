@@ -206,6 +206,25 @@ static double rel_error(const std::vector<float> &x, const std::vector<float> &r
     return std::sqrt(num / den);
 }
 
+// Independent of cuBLAS: recomputes a fixed sample of entries on the host in
+// double precision and compares.
+static double spot_error(const std::vector<float> &C, const std::vector<float> &A,
+                         const std::vector<float> &B, int n)
+{
+    std::mt19937 rng(99);
+    std::uniform_int_distribution<int> pick(0, n - 1);
+    double num = 0.0, den = 0.0;
+    for (int s = 0; s < 512; ++s) {
+        const int i = pick(rng), j = pick(rng);
+        double ref = 0.0;
+        for (int k = 0; k < n; ++k) ref += (double)A[(size_t)i * n + k] * B[(size_t)k * n + j];
+        const double d = C[(size_t)i * n + j] - ref;
+        num += d * d;
+        den += ref * ref;
+    }
+    return std::sqrt(num / den);
+}
+
 int main(int argc, char **argv)
 {
     std::vector<int> sizes = {1024, 2048, 4096};
@@ -272,7 +291,7 @@ int main(int argc, char **argv)
 
         csv = std::fopen((out_dir + "/bench.csv").c_str(), "w");
         if (!csv) { std::perror("bench.csv"); return 1; }
-        std::fprintf(csv, "kernel,n,ms_best,ms_median,gflops,pct_cublas,rel_err\n");
+        std::fprintf(csv, "kernel,n,ms_best,ms_median,gflops,pct_cublas,rel_err,host_err\n");
     }
 
     bool all_ok = true;
@@ -294,8 +313,8 @@ int main(int argc, char **argv)
         const double gflop = 2.0 * n * n * (double)n / 1e9;
 
         if (!profile)
-            std::printf("N = %d\n  %-11s %10s %10s %10s %9s %9s\n", n, "kernel", "best ms", "median ms",
-                        "GFLOP/s", "% cuBLAS", "rel.err");
+            std::printf("N = %d\n  %-11s %10s %10s %10s %9s %10s %9s\n", n, "kernel", "best ms", "median ms",
+                        "GFLOP/s", "% cuBLAS", "vs cuBLAS", "vs host");
 
         double cublas_gflops = 0.0;
         for (const Stage &s : kStages) {
@@ -325,13 +344,14 @@ int main(int argc, char **argv)
             } else {
                 err = rel_error(hC, hRef);
             }
-            const bool ok = err < 1e-4;
+            const double host_err = spot_error(hC, hA, hB, n);
+            const bool ok = err < 1e-4 && host_err < 1e-4;
             all_ok = all_ok && ok;
             const double pct = 100.0 * gflops / cublas_gflops;
-            std::printf("  %-11s %10.3f %10.3f %10.1f %8.1f%% %9.1e%s\n", s.name, t.best_ms, t.median_ms,
-                        gflops, pct, err, ok ? "" : "  WRONG RESULT");
-            std::fprintf(csv, "%s,%d,%.4f,%.4f,%.2f,%.2f,%.3e\n", s.name, n, t.best_ms, t.median_ms, gflops,
-                         pct, err);
+            std::printf("  %-11s %10.3f %10.3f %10.1f %8.1f%% %10.1e %9.1e%s\n", s.name, t.best_ms,
+                        t.median_ms, gflops, pct, err, host_err, ok ? "" : "  WRONG RESULT");
+            std::fprintf(csv, "%s,%d,%.4f,%.4f,%.2f,%.2f,%.3e,%.3e\n", s.name, n, t.best_ms, t.median_ms,
+                         gflops, pct, err, host_err);
         }
         if (!profile) std::printf("\n");
 
